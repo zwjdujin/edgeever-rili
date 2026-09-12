@@ -1,0 +1,26 @@
+# Debug files
+tools/dbg*.js
+tools/make-dbg*.js
+tools/build-lunar-table.js
+
+# Test files
+test-*.js
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node modules (if any)
+node_modules/
