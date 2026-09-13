@@ -28,3 +28,7 @@ node_modules/
 # Generated lunar table (intermediate artifact of tools/generate-lunar-data.js)
 tools/lunar-table.json
 
+
+# Release 临时文件
+tools/release-body.json
+release-body.json

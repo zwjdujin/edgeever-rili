@@ -52,7 +52,8 @@ upload() {
 upload main.js application/javascript
 upload manifest.json application/json
 
-# 7. 验证（未认证视角，模拟安装器）
+# 7. 验证（未认证视角，模拟安装器）+ 清理临时文件
 sleep 2
+rm -f release-body.json
 echo "--- 验证 Release v$NEW_VERSION ---"
 curl -s "https://api.github.com/repos/$REPO/releases/tags/v$NEW_VERSION" | grep -oE '"tag_name": *"[^"]*"|"browser_download_url": *"[^"]*"'
