@@ -464,6 +464,25 @@ const renderCalendarPanel = async (context, container, shell, options) => {
   await render();
 };
 
+// 在当前编辑的笔记光标处插入文本（需宿主提供 editor.write 能力）
+const insertAtCursor = async (context, text, label) => {
+  try {
+    await context.editor.insertAtCursor(text);
+  } catch (error) {
+    context.ui.showNotice(`插入${label}失败：${error instanceof Error ? error.message : String(error)}`);
+  }
+};
+
+const insertCurrentDate = async (context) => {
+  const format = await resolveSetting(context, "date-format", "YYYY-MM-DD");
+  await insertAtCursor(context, formatDate(new Date(), format), "日期");
+};
+
+const insertCurrentTime = async (context) => {
+  const format = await resolveSetting(context, "time-format", "YYYY-MM-DD HH:mm");
+  await insertAtCursor(context, formatDate(new Date(), format), "时间");
+};
+
 export default {
   activate(context) {
     // 注册日历面板
@@ -478,7 +497,7 @@ export default {
         });
       },
     });
-    
+
     // 注册打开日历面板命令
     const disposeOpen = context.commands.register({
       id: "open-calendar",
@@ -487,49 +506,27 @@ export default {
         await context.ui.panels.open("calendar");
       },
     });
-    
-    // 注册插入日期快捷键
+
+    // 注册插入命令（EdgeEver 插件 API 无快捷键注册机制，
+    // 命令显示在插件工具栏菜单中；下方的键盘监听为其快捷键补充）
     const disposeInsertDate = context.commands.register({
       id: "insert-date",
       title: "插入当前日期",
-      menu: false,
-      key: "Control+;",
+      listed: false,
       async run() {
-        const dateFormat = await resolveSetting(context, "date-format", "YYYY-MM-DD");
-        const currentDate = new Date();
-        const formattedDate = formatDate(currentDate, dateFormat);
-        
-        try {
-          // 插入到当前编辑的笔记
-          await context.editor.insertText(formattedDate);
-          context.ui.showNotice(`已插入日期：${formattedDate}`);
-        } catch (error) {
-          context.ui.showNotice(`插入日期失败：${error instanceof Error ? error.message : String(error)}`);
-        }
+        await insertCurrentDate(context);
       },
     });
-    
-    // 注册插入时间快捷键
+
     const disposeInsertTime = context.commands.register({
       id: "insert-time",
       title: "插入当前时间",
-      menu: false,
-      key: "Control+Shift+;",
+      listed: false,
       async run() {
-        const timeFormat = await resolveSetting(context, "time-format", "YYYY-MM-DD HH:mm");
-        const currentDate = new Date();
-        const formattedTime = formatDate(currentDate, timeFormat);
-        
-        try {
-          // 插入到当前编辑的笔记
-          await context.editor.insertText(formattedTime);
-          context.ui.showNotice(`已插入时间：${formattedTime}`);
-        } catch (error) {
-          context.ui.showNotice(`插入时间失败：${error instanceof Error ? error.message : String(error)}`);
-        }
+        await insertCurrentTime(context);
       },
     });
-    
+
     // 注册统计命令
     const disposeStats = context.commands.register({
       id: "calendar-stats",
@@ -547,8 +544,29 @@ export default {
         context.ui.showNotice(`当前共有 ${notes.length} 篇日历笔记（标签「${calendarTag}」）。`);
       },
     });
-    
+
+    // 快捷键（尽力而为）：官方 API 未提供快捷键扩展点，若插件与宿主共享文档，
+    // 则通过捕获阶段监听 Ctrl+;（日期）/ Ctrl+Shift+;（时间）。
+    // 用 event.code 而非 event.key：Shift+; 在多数布局上产生 ":"，按物理键位才稳定。
+    // 若宿主将插件隔离在沙箱文档中，此处静默失效，命令仍可从插件工具栏菜单触发。
+    const onKeyDown = (event) => {
+      if (event.code !== "Semicolon" || event.altKey || event.repeat) return;
+      if (!(event.ctrlKey || event.metaKey)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.shiftKey) insertCurrentTime(context);
+      else insertCurrentDate(context);
+    };
+    let disposeKeys = () => {};
+    try {
+      document.addEventListener("keydown", onKeyDown, true);
+      disposeKeys = () => document.removeEventListener("keydown", onKeyDown, true);
+    } catch {
+      // 宿主沙箱不支持全局键盘监听时忽略，插件工具栏菜单命令始终可用
+    }
+
     return () => {
+      disposeKeys();
       disposePanel();
       disposeOpen();
       disposeInsertDate();
