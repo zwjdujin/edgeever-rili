@@ -2,14 +2,24 @@
   "type": "plugin",
   "id": "com.zwjdujin.edgeever-rili",
   "name": "EdgeEver 日历",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "apiVersion": "2",
   "settingsUi": "host",
   "description": "为 EdgeEver 添加日历功能：支持公历农历、快捷键插入日期时间、日历视图和笔记热力图。",
   "author": "zwjdujin",
   "entry": "./main.js",
-  "platforms": ["web", "desktop"],
-  "permissions": ["notes:read", "notes:write", "ui:commands", "ui:notices", "ui:panels", "ui:navigation"],
+  "platforms": [
+    "web",
+    "desktop"
+  ],
+  "permissions": [
+    "notes:read",
+    "notes:write",
+    "ui:commands",
+    "ui:notices",
+    "ui:panels",
+    "ui:navigation"
+  ],
   "settings": {
     "fields": [
       {
