@@ -179,6 +179,59 @@ function getHeatmapColor(count, maxCount) {
   return '#239a3b';
 }
 
+// ===== 生日（与 edgeever-rjgx 人际关系插件联动） =====
+
+const isLeapYear = (y) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+
+// 解析联系人笔记中的「生日：」行（人际插件写入格式为 - 生日：YYYY-MM-DD，
+// 兼容 1990年5月23日 / 1990/5/23 / 5月23日 等手写变体）
+const parseBirthday = (content) => {
+  const match = String(content || "").match(/^\s*[-*]?\s*生日[：:]\s*(?:(\d{4})[年\-/])?\s*(\d{1,2})\s*[月\-/]\s*(\d{1,2})\s*日?/m);
+  if (!match) return null;
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return { year: match[1] ? Number(match[1]) : null, month, day };
+};
+
+// 读取联系人笔记并解析生日（逐篇 get 以拿到完整内容）
+const loadBirthdays = async (context, contactTag) => {
+  if (!contactTag) return [];
+  const result = await context.notes.query({ tags: [contactTag], sort: "title-asc", limit: 1000 });
+  const contacts = result.notes || [];
+  const birthdays = [];
+  for (const contact of contacts) {
+    try {
+      const full = await context.notes.get(contact.id);
+      const birth = parseBirthday(full && full.contentMarkdown);
+      if (birth) birthdays.push({ id: contact.id, name: contact.title || "（未命名）", birth });
+    } catch {
+      // 单个联系人读取失败不影响其余
+    }
+  }
+  return birthdays;
+};
+
+// 生日索引：键 "月-日"（如 "8-15"）
+const buildBirthdayIndex = (birthdays) => {
+  const index = new Map();
+  for (const b of birthdays) {
+    const key = `${b.birth.month}-${b.birth.day}`;
+    if (!index.has(key)) index.set(key, []);
+    index.get(key).push(b);
+  }
+  return index;
+};
+
+// 取某天的生日；2月29日生日在平年显示于 2月28日
+const birthdaysForDate = (index, date) => {
+  const out = index ? (index.get(`${date.getMonth() + 1}-${date.getDate()}`) || []) : [];
+  if (date.getMonth() === 1 && date.getDate() === 28 && !isLeapYear(date.getFullYear())) {
+    return out.concat(index.get("2-29") || []);
+  }
+  return out;
+};
+
 const resolveSetting = async (context, key, fallback) => {
   try {
     const value = await context.settings.get(key);
@@ -214,7 +267,7 @@ const listNotesByDate = async (context, calendarTag, year, month) => {
   return notesByDate;
 };
 
-const buildCalendarGrid = (calendar, notesByDate, maxCount) => {
+const buildCalendarGrid = (calendar, notesByDate, maxCount, birthdayIndex, openNote) => {
   const grid = document.createElement('div');
   grid.style.cssText = 'display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: #e5e7eb; padding: 1px; border-radius: 8px;';
   
@@ -267,6 +320,27 @@ const buildCalendarGrid = (calendar, notesByDate, maxCount) => {
       ? (day.lunar.day === 1 ? `${day.lunar.monthName}月` : day.lunar.dayName)
       : '';
     dayCell.appendChild(lunarText);
+
+    // 生日标记（与人际关系插件联动）
+    const birthdays = birthdaysForDate(birthdayIndex, day.date);
+    birthdays.slice(0, 2).forEach((b) => {
+      const age = b.birth.year ? day.date.getFullYear() - b.birth.year : null;
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.textContent = `🎂 ${b.name}${age !== null ? ` ${age}` : ''}`;
+      chip.title = `${b.name} 的生日${age !== null ? `（满 ${age} 岁）` : ''}`;
+      chip.style.cssText = 'display:block; width:100%; text-align:left; margin-top:1px; padding:0 3px; font-size:10px; line-height:15px; border:none; border-radius:4px; background:rgba(244,114,182,0.18); color:#be185d; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+      chip.addEventListener('mouseenter', () => { chip.style.background = 'rgba(244,114,182,0.32)'; });
+      chip.addEventListener('mouseleave', () => { chip.style.background = 'rgba(244,114,182,0.18)'; });
+      chip.addEventListener('click', async () => { await openNote(b.id); });
+      dayCell.appendChild(chip);
+    });
+    if (birthdays.length > 2) {
+      const more = document.createElement('div');
+      more.textContent = `+${birthdays.length - 2} 位`;
+      more.style.cssText = 'font-size:10px; line-height:14px; color:#be185d; opacity:0.8;';
+      dayCell.appendChild(more);
+    }
     
     // 热力图
     const dateKey = `${day.date.getFullYear()}-${String(day.date.getMonth() + 1).padStart(2, '0')}-${String(day.date.getDate()).padStart(2, '0')}`;
@@ -286,8 +360,48 @@ const buildCalendarGrid = (calendar, notesByDate, maxCount) => {
     
     grid.appendChild(dayCell);
   });
-  
+
   return grid;
+};
+
+// 本月生日列表（按日期排序，点击打开联系人笔记）
+const buildBirthdaySection = (calendar, birthdayIndex, openNote) => {
+  const seen = new Set();
+  const entries = [];
+  for (const day of calendar) {
+    if (!day.isCurrentMonth) continue;
+    for (const b of birthdaysForDate(birthdayIndex, day.date)) {
+      if (seen.has(b.id)) continue;
+      seen.add(b.id);
+      entries.push({
+        ...b,
+        day: day.date.getDate(),
+        age: b.birth.year ? day.date.getFullYear() - b.birth.year : null,
+      });
+    }
+  }
+  if (entries.length === 0) return null;
+  entries.sort((a, b) => a.day - b.day || a.name.localeCompare(b.name, 'zh'));
+
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'margin-top: 24px;';
+
+  const header = document.createElement('div');
+  header.textContent = `🎂 本月生日（${entries.length}）`;
+  header.style.cssText = 'font-size: 14px; font-weight: 600; color: #be185d; margin-bottom: 8px;';
+  wrap.appendChild(header);
+
+  for (const e of entries) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.textContent = `${e.day} 日 · ${e.name}${e.age !== null ? `（满 ${e.age} 岁）` : ''}`;
+    row.style.cssText = 'display:block; width:100%; text-align:left; padding:8px 12px; margin:0 0 6px; border:1px solid rgba(244,114,182,0.4); border-radius:8px; background:rgba(244,114,182,0.08); cursor:pointer; font:inherit; color:inherit;';
+    row.addEventListener('mouseenter', () => { row.style.background = 'rgba(244,114,182,0.18)'; });
+    row.addEventListener('mouseleave', () => { row.style.background = 'rgba(244,114,182,0.08)'; });
+    row.addEventListener('click', async () => { await openNote(e.id); });
+    wrap.appendChild(row);
+  }
+  return wrap;
 };
 
 const buildNotesList = (notesByDate) => {
@@ -353,20 +467,23 @@ const buildNotesList = (notesByDate) => {
 
 const renderCalendarPanel = async (context, container, shell, options) => {
   const calendarTag = await resolveSetting(context, "calendar-tag", "日历");
+  const contactTag = await resolveSetting(context, "contact-tag", "人际");
   const dateFormat = await resolveSetting(context, "date-format", "YYYY-MM-DD");
   const timeFormat = await resolveSetting(context, "time-format", "YYYY-MM-DD HH:mm");
-  
+
   const currentDate = new Date();
   let currentYear = currentDate.getFullYear();
   let currentMonth = currentDate.getMonth() + 1;
-  
-  const state = { notesByDate: {}, maxCount: 0 };
-  
-  const applyChrome = (count) => {
+
+  const state = { notesByDate: {}, maxCount: 0, birthdays: null, birthdaysTag: null };
+  const openNote = async (id) => { await context.ui.openNote(id); };
+
+  const applyChrome = (count, birthdayCount) => {
     shell.set({
       header: {
         title: "日历",
-        description: `查看 ${currentYear} 年 ${getMonthName(currentMonth)} 的笔记`,
+        description: `查看 ${currentYear} 年 ${getMonthName(currentMonth)} 的笔记`
+          + (birthdayCount !== null ? ` · 本月 ${birthdayCount} 位生日` : ""),
         actions: [
           { id: "prev-month", label: "上月" },
           { id: "next-month", label: "下月" },
@@ -413,6 +530,7 @@ const renderCalendarPanel = async (context, container, shell, options) => {
           currentMonth = currentDate.getMonth() + 1;
           render();
         } else if (id === "refresh") {
+          state.birthdays = null; // 强制重新加载生日缓存
           render();
         }
       },
@@ -428,25 +546,45 @@ const renderCalendarPanel = async (context, container, shell, options) => {
   
   const render = async () => {
     container.replaceChildren();
-    
+
     try {
       state.notesByDate = await listNotesByDate(context, calendarTag, currentYear, currentMonth);
       state.maxCount = Math.max(...Object.values(state.notesByDate).map(notes => notes.length), 1);
-      
+
+      // 生日缓存：仅在标签变化或手动刷新时重新加载
+      if (!state.birthdays || state.birthdaysTag !== contactTag) {
+        try {
+          state.birthdays = await loadBirthdays(context, contactTag);
+          state.birthdaysTag = contactTag;
+        } catch {
+          state.birthdays = null; // 生日加载失败不影响日历主体
+        }
+      }
+      const birthdayIndex = state.birthdays ? buildBirthdayIndex(state.birthdays) : null;
+
       const calendar = generateCalendarData(currentYear, currentMonth);
-      const calendarGrid = buildCalendarGrid(calendar, state.notesByDate, state.maxCount);
+      const calendarGrid = buildCalendarGrid(calendar, state.notesByDate, state.maxCount, birthdayIndex, openNote);
       container.appendChild(calendarGrid);
-      
+
+      let birthdayCount = null;
+      if (birthdayIndex) {
+        const birthdaySection = buildBirthdaySection(calendar, birthdayIndex, openNote);
+        if (birthdaySection) container.appendChild(birthdaySection);
+        birthdayCount = calendar
+          .filter((day) => day.isCurrentMonth)
+          .reduce((sum, day) => sum + birthdaysForDate(birthdayIndex, day.date).length, 0);
+      }
+
       const notesList = buildNotesList(state.notesByDate);
       container.appendChild(notesList);
-      
+
       updateSelectors();
-      applyChrome(Object.keys(state.notesByDate).length);
+      applyChrome(Object.keys(state.notesByDate).length, birthdayCount);
     } catch (error) {
       const errorLine = document.createElement('p');
       errorLine.textContent = `加载日历数据失败：${error instanceof Error ? error.message : String(error)}`;
       container.appendChild(errorLine);
-      applyChrome(0);
+      applyChrome(0, null);
     }
   };
   

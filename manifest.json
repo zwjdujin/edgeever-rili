@@ -25,6 +25,13 @@
   "settings": {
     "fields": [
       {
+        "key": "contact-tag",
+        "type": "text",
+        "label": "联系人标签",
+        "default": "人际",
+        "description": "与人际关系插件联动：带有此标签的笔记，其「生日」字段会显示在日历中。留空则关闭生日显示。"
+      },
+      {
         "key": "calendar-tag",
         "type": "text",
         "label": "日历标签",
